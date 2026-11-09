@@ -2,9 +2,9 @@
 import sqlite3
 import os
 from typing import List, Dict, Optional
-from datetime import datetime
+from ..config import SQLITE_DB_PATH
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "kira.db")
+DB_PATH = SQLITE_DB_PATH
 
 
 def get_db_connection():
@@ -69,6 +69,26 @@ def list_sessions() -> List[Dict]:
     return [dict(r) for r in rows]
 
 
+def delete_session(session_id: str):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+    cursor.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+    conn.commit()
+    conn.close()
+
+
+def rename_session(session_id: str, new_title: str):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE sessions SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (new_title, session_id)
+    )
+    conn.commit()
+    conn.close()
+
+
 def save_message(session_id: str, role: str, content: str):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -113,4 +133,3 @@ def get_recent_context(session_id: str, limit: int = 10) -> List[Dict]:
     rows = cursor.fetchall()
     conn.close()
     return [{"role": r["role"], "content": r["content"]} for r in rows]
-

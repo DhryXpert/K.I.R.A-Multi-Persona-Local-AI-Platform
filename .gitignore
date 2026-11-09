@@ -53,3 +53,4 @@ pnpm-debug.log*
 Thumbs.db
 
 Docs/*
+ref/

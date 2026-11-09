@@ -15,6 +15,11 @@ from ..memory.store import (
     get_recent_context,
     get_messages,
     list_sessions,
+    delete_session,
+    rename_session,
+)
+from ..memory.vector_store import (
+    search_memories,
 )
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -24,6 +29,11 @@ class ChatRequest(BaseModel):
     persona_id: str
     message: str
     session_id: Optional[str] = None
+    model: Optional[str] = None
+
+
+class RenameRequest(BaseModel):
+    title: str
 
 
 @router.get("/sessions")
@@ -40,12 +50,30 @@ def get_session_history(session_id: str):
     return {"session": session, "messages": messages}
 
 
+@router.delete("/sessions/{session_id}")
+def delete_session_endpoint(session_id: str):
+    delete_session(session_id)
+    return {"status": "ok"}
+
+
+@router.patch("/sessions/{session_id}")
+def rename_session_endpoint(session_id: str, req: RenameRequest):
+    if not req.title.strip():
+        raise HTTPException(status_code=400, detail="Title cannot be empty")
+    rename_session(session_id, req.title.strip())
+    return {"status": "ok", "title": req.title.strip()}
+
+
 @router.post("")
 async def send_message(req: ChatRequest):
     # Verify persona exists
     persona = get_persona(req.persona_id)
     if not persona:
         raise HTTPException(status_code=404, detail=f"Persona '{req.persona_id}' not found")
+
+    # If request specifies a model override, apply it
+    if req.model:
+        persona = persona.model_copy(update={"model": req.model})
 
     # Check Ollama status
     if not await check_ollama_health():
@@ -64,6 +92,10 @@ async def send_message(req: ChatRequest):
     # Save user message to SQLite
     save_message(session_id, "user", req.message)
 
+    # Retrieve relevant memories across persona namespace and shared user_core
+    namespaces = [persona.memory_namespace, "user_core"]
+    memories = search_memories(namespaces, req.message, limit=4)
+
     # Get recent conversation context (sliding window)
     context_messages = get_recent_context(session_id, limit=10)
 
@@ -71,12 +103,16 @@ async def send_message(req: ChatRequest):
         # First send session meta info
         yield {
             "event": "start",
-            "data": json.dumps({"session_id": session_id, "persona_id": persona.id})
+            "data": json.dumps({
+                "session_id": session_id,
+                "persona_id": persona.id,
+                "model": persona.model
+            })
         }
 
         full_reply = []
         try:
-            async for token in stream_chat(persona, context_messages):
+            async for token in stream_chat(persona, context_messages, relevant_memories=memories):
                 full_reply.append(token)
                 yield {
                     "event": "token",
@@ -98,4 +134,3 @@ async def send_message(req: ChatRequest):
             }
 
     return EventSourceResponse(event_generator())
-
