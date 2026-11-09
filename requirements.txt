@@ -1,0 +1,3 @@
+# Minimal dependencies for Kiara chat client
+ollama
+requests
